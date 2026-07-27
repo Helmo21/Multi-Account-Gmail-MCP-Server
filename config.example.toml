@@ -1,0 +1,34 @@
+# Copy to your config directory as config.toml.
+#   Linux:   ~/.config/gmail-mcp/config.toml
+#   macOS:   ~/Library/Application Support/gmail-mcp/config.toml
+#   Windows: %LOCALAPPDATA%\gmail-mcp\config.toml
+#
+# send_policy must be one of:
+#   send        transmit immediately when asked
+#   confirm     save a draft unless the call passes confirm=true
+#   draft_only  never transmit; always save a draft
+
+[[accounts]]
+alias       = "personal"
+email       = "you@yourdomain.com"
+send_policy = "confirm"
+
+[[accounts]]
+alias       = "work-main"
+email       = "main@yourdomain.com"
+send_policy = "confirm"
+
+[[accounts]]
+alias       = "work-sales"
+email       = "sales@yourdomain.com"
+send_policy = "draft_only"
+
+[[accounts]]
+alias       = "work-support"
+email       = "support@yourdomain.com"
+send_policy = "draft_only"
+
+[[accounts]]
+alias       = "work-billing"
+email       = "billing@yourdomain.com"
+send_policy = "draft_only"

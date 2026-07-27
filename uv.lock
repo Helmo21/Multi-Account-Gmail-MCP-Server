@@ -275,6 +275,7 @@ dependencies = [
     { name = "keyring" },
     { name = "mcp" },
     { name = "platformdirs" },
+    { name = "pydantic" },
 ]
 
 [package.dev-dependencies]
@@ -290,6 +291,7 @@ requires-dist = [
     { name = "keyring", specifier = ">=25.0.0" },
     { name = "mcp", specifier = ">=1.2.0" },
     { name = "platformdirs", specifier = ">=4.2.0" },
+    { name = "pydantic", specifier = ">=2" },
 ]
 
 [package.metadata.requires-dev]
