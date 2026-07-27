@@ -2,7 +2,6 @@ import pytest
 
 from gmail_mcp.gmail.search import (
     MAX_RESULTS_CAP,
-    METADATA_HEADERS,
     fetch_metadata,
     header,
     search_messages,
@@ -123,7 +122,14 @@ def test_fetch_metadata_requests_metadata_only_with_the_expected_headers():
 
     call = messages.get_calls[0]
     assert call["format"] == "metadata"
-    assert call["metadataHeaders"] == METADATA_HEADERS
+    # Pinned to the literal expected value (not METADATA_HEADERS itself) and
+    # to `list`, not just sequence equality: googleapiclient only expands a
+    # repeated query parameter into multiple metadataHeaders=... pairs when
+    # the value's type is exactly `list`. A tuple compares equal here but
+    # gets silently stringified into one bogus header value in the real
+    # request, so this must fail if the constant is ever frozen to a tuple.
+    assert call["metadataHeaders"] == ["From", "To", "Subject", "Date"]
+    assert isinstance(call["metadataHeaders"], list)
 
 
 def test_message_vanishing_between_list_and_get_is_skipped():

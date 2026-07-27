@@ -118,6 +118,23 @@ def test_fallback_file_is_owner_only(tmp_path):
     assert mode == 0o600
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions only")
+def test_fallback_file_is_owner_only_despite_stale_wide_open_tmp_file(tmp_path):
+    # A leftover tokens.json.tmp -- exactly what a crash between write and
+    # rename leaves behind -- must not carry its old, wider mode onto the
+    # real file: O_CREAT does not re-chmod a file that already exists, so
+    # the store must fchmod it explicitly regardless.
+    tmp_file = tmp_path / "tokens.json.tmp"
+    tmp_file.write_text("{}")
+    tmp_file.chmod(0o644)
+
+    store = TokenStore(tmp_path, keyring_module=BrokenKeyring())
+    store.set("personal", "x")
+
+    mode = stat.S_IMODE((tmp_path / "tokens.json").stat().st_mode)
+    assert mode == 0o600
+
+
 def test_fallback_delete_removes_entry(tmp_path):
     store = TokenStore(tmp_path, keyring_module=BrokenKeyring())
     store.set("personal", "x")

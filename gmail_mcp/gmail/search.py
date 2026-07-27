@@ -6,7 +6,13 @@ from gmail_mcp.gmail.client import NotFoundError, execute
 
 DEFAULT_MAX_RESULTS = 20
 MAX_RESULTS_CAP = 100
-METADATA_HEADERS = ("From", "To", "Subject", "Date")
+# Must stay a literal list, not a tuple: googleapiclient only expands a
+# repeated query parameter (so this becomes four metadataHeaders=... pairs)
+# when the value's type is exactly `list` -- it checks `type(value) ==
+# type([])`, which a tuple fails. A tuple here gets stringified into a
+# single bogus header value instead, and every From/To/Subject/Date lookup
+# silently comes back empty.
+METADATA_HEADERS = ["From", "To", "Subject", "Date"]
 
 
 def header(payload: dict, name: str) -> str:

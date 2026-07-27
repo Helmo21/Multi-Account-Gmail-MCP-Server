@@ -47,6 +47,13 @@ def _write_json_private(path: Path, data: dict) -> None:
     # where the file exists world-readable with token JSON already
     # written into it.
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    # O_CREAT only sets the mode when it actually creates the file: a
+    # leftover tmp file from a prior crash between write and rename keeps
+    # its old mode otherwise, and replace() below would carry that wider
+    # mode onto the real path. fchmod it explicitly so the mode is correct
+    # either way.
+    if hasattr(os, "fchmod"):
+        os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w") as f:
         f.write(json.dumps(data, indent=2))
     tmp.replace(path)
