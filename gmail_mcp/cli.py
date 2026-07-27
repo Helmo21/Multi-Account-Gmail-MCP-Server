@@ -4,14 +4,30 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Protocol
 
 import keyring as _keyring
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 from gmail_mcp.auth import authenticate_account, load_credentials
 from gmail_mcp.config import ConfigError, config_dir, load_config
 from gmail_mcp.storage import TokenStore
+
+
+class KeyringLike(Protocol):
+    """Duck type for the `keyring` module and its test doubles.
+
+    Matches both the real `keyring` module and fakes like the tests'
+    `_BrokenKeyring`, which are plain objects rather than modules.
+    """
+
+    def get_password(self, service: str, username: str) -> str | None: ...
+    def set_password(self, service: str, username: str, password: str) -> None: ...
+    def delete_password(self, service: str, username: str) -> None: ...
+    def get_keyring(self) -> object: ...
 
 
 def lookup_profile_email(credentials) -> str:
@@ -31,8 +47,8 @@ def cmd_auth_add(
     alias: str,
     client_secret: Path,
     *,
-    keyring_module=_keyring,
-    profile_lookup=lookup_profile_email,
+    keyring_module: KeyringLike = _keyring,
+    profile_lookup: Callable[[Credentials], str] = lookup_profile_email,
 ) -> int:
     try:
         config = _load(directory)
@@ -62,7 +78,7 @@ def cmd_auth_add(
     return 0
 
 
-def cmd_auth_list(directory: Path, *, keyring_module=_keyring) -> int:
+def cmd_auth_list(directory: Path, *, keyring_module: KeyringLike = _keyring) -> int:
     try:
         config = _load(directory)
     except ConfigError as exc:
@@ -85,7 +101,9 @@ def cmd_auth_list(directory: Path, *, keyring_module=_keyring) -> int:
     return 0
 
 
-def cmd_auth_remove(directory: Path, alias: str, *, keyring_module=_keyring) -> int:
+def cmd_auth_remove(
+    directory: Path, alias: str, *, keyring_module: KeyringLike = _keyring
+) -> int:
     try:
         config = _load(directory)
         config.get(alias)
@@ -98,13 +116,16 @@ def cmd_auth_remove(directory: Path, alias: str, *, keyring_module=_keyring) -> 
     return 0
 
 
-def _default_probe(alias: str, store, directory: Path) -> str:
+def _default_probe(alias: str, store: TokenStore, directory: Path) -> str:
     credentials = load_credentials(alias, store)
     return lookup_profile_email(credentials)
 
 
 def cmd_doctor(
-    directory: Path, *, probe=_default_probe, keyring_module=_keyring
+    directory: Path,
+    *,
+    probe: Callable[[str, TokenStore, Path], str] = _default_probe,
+    keyring_module: KeyringLike = _keyring,
 ) -> int:
     """Check config, credentials, and Gmail reachability for every account."""
     try:
@@ -146,7 +167,11 @@ def cmd_doctor(
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    serve_entrypoint: Callable[[Path], None] | None = None,
+) -> int:
     parser = argparse.ArgumentParser(prog="gmail-mcp")
     parser.add_argument(
         "--config-dir", type=Path, default=None,
@@ -176,9 +201,10 @@ def main(argv: list[str] | None = None) -> int:
     directory = args.config_dir or config_dir()
 
     if args.command == "serve":
-        from gmail_mcp.server import main as serve_main
+        if serve_entrypoint is None:
+            from gmail_mcp.server import main as serve_entrypoint
 
-        serve_main()
+        serve_entrypoint(directory)
         return 0
 
     if args.command == "doctor":

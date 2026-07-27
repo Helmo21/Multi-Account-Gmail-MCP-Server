@@ -7,10 +7,14 @@ One project serves all five accounts.
 1. Create a project at <https://console.cloud.google.com/>.
 2. **APIs & Services → Library →** enable **Gmail API**.
 3. **APIs & Services → OAuth consent screen →** choose **Internal**.
-   Internal is available because every mailbox is on one Workspace
-   domain. It needs no Google verification, shows no "unverified app"
-   warning, and — unlike an External screen in Testing status — does not
-   expire refresh tokens after seven days.
+   Internal is available because every mailbox is on one Google Workspace
+   domain — this setup assumes all five accounts share that domain. It
+   needs no Google verification, shows no "unverified app" warning, and
+   — unlike an External screen in Testing status — does not expire
+   refresh tokens after seven days. A plain `@gmail.com` address is not
+   part of any Workspace domain, so it cannot be added to an Internal
+   consent screen; if you later add one, its authentication will fail
+   for this reason, not a bug.
 4. Add the scope `https://www.googleapis.com/auth/gmail.modify`. Add
    nothing else.
 5. **Credentials → Create credentials → OAuth client ID →
@@ -61,6 +65,16 @@ directory before saving that file if you have not already.
 
 ## 4. Authenticate each account
 
+> **Before you run any of these:** each command opens a browser, and
+> Google reuses whichever session is already signed in. Running the five
+> commands below back to back in the same browser will sign every one of
+> them in as whichever account happens to be logged in already. **Sign in
+> as the exact address configured for that alias, and sign out or switch
+> to a private/incognito window between each command.** If the wrong
+> mailbox gets authenticated, nothing is saved and the command tells you
+> which address it saw — you just lose that run, not any data — but it is
+> easy to avoid entirely by signing out first.
+
 Run once per alias:
 
 ```bash
@@ -70,12 +84,6 @@ uv run gmail-mcp auth add work-sales
 uv run gmail-mcp auth add work-support
 uv run gmail-mcp auth add work-billing
 ```
-
-Each opens a browser. **Sign in as the exact address configured for that
-alias.** Google reuses whichever session is already signed in, so when
-authenticating several accounts in a row, either sign out between them or
-use a private window. If the wrong mailbox is authenticated the command
-refuses to save anything and tells you which address it saw.
 
 Check the result:
 
@@ -106,7 +114,7 @@ Add to `claude_desktop_config.json`:
 | --- | --- |
 | macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
 | Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
-| Linux | `~/.config/Claude/claude_desktop_config.json` |
+| Linux | `~/.config/Claude/claude_desktop_config.json` (Claude Desktop on Linux is unofficial/community-supported; paths and availability may vary by build) |
 
 ```json
 {

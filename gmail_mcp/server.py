@@ -278,5 +278,5 @@ def create_server(runtime: Runtime) -> FastMCP:
     return server
 
 
-def main() -> None:
-    create_server(build_runtime()).run(transport="stdio")
+def main(directory: Path | None = None) -> None:
+    create_server(build_runtime(directory)).run(transport="stdio")

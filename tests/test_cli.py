@@ -2,7 +2,8 @@ import json
 
 import pytest
 
-from gmail_mcp.cli import cmd_auth_list, cmd_auth_remove, cmd_doctor, main
+from gmail_mcp.auth import AccountMismatchError
+from gmail_mcp.cli import cmd_auth_add, cmd_auth_list, cmd_auth_remove, cmd_doctor, main
 
 CONFIG = """
 [[accounts]]
@@ -98,6 +99,88 @@ def test_doctor_flags_a_mailbox_that_does_not_match_config(home, capsys):
 
     assert code == 1
     assert "stranger@example.com" in out
+
+
+def test_auth_add_rejects_a_mismatched_mailbox_and_saves_nothing(
+    home, capsys, monkeypatch
+):
+    secret = home / "client_secret.json"
+    secret.write_text("{}")
+
+    def fake_authenticate(account, client_secret, store, profile_lookup):
+        raise AccountMismatchError(
+            f"Alias {account.alias!r} is configured for {account.email}, "
+            "but the browser authenticated stranger@example.com. "
+            "Nothing was saved."
+        )
+
+    monkeypatch.setattr("gmail_mcp.cli.authenticate_account", fake_authenticate)
+
+    code = cmd_auth_add(home, "personal", secret, keyring_module=_BrokenKeyring())
+    out = capsys.readouterr().out
+
+    assert code == 1
+    assert "me@example.com" in out
+    assert "stranger@example.com" in out
+    assert not (home / "tokens.json").exists() or json.loads(
+        (home / "tokens.json").read_text()
+    ) == {}
+
+
+def test_auth_add_rejects_a_missing_client_secret_without_starting_a_flow(
+    home, capsys, monkeypatch
+):
+    calls = []
+
+    def fake_authenticate(account, client_secret, store, profile_lookup):
+        calls.append(account.alias)
+        return account.email
+
+    monkeypatch.setattr("gmail_mcp.cli.authenticate_account", fake_authenticate)
+
+    secret = home / "client_secret.json"  # deliberately never created
+
+    code = cmd_auth_add(home, "personal", secret, keyring_module=_BrokenKeyring())
+    out = capsys.readouterr().out
+
+    assert code == 1
+    assert str(secret) in out
+    assert calls == []
+    assert not (home / "tokens.json").exists()
+
+
+def test_auth_add_stores_the_token_on_success(home, capsys, monkeypatch):
+    secret = home / "client_secret.json"
+    secret.write_text("{}")
+
+    def fake_authenticate(account, client_secret, store, profile_lookup):
+        store.set(account.alias, json.dumps({"token": "abc"}))
+        return account.email
+
+    monkeypatch.setattr("gmail_mcp.cli.authenticate_account", fake_authenticate)
+
+    code = cmd_auth_add(home, "personal", secret, keyring_module=_BrokenKeyring())
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "me@example.com" in out
+    assert "file:" in out
+    stored = json.loads((home / "tokens.json").read_text())
+    assert stored["personal"] == json.dumps({"token": "abc"})
+
+
+def test_serve_command_forwards_the_resolved_config_dir(home, capsys):
+    seen = []
+
+    def fake_serve(directory):
+        seen.append(directory)
+
+    code = main(
+        ["--config-dir", str(home), "serve"], serve_entrypoint=fake_serve
+    )
+
+    assert code == 0
+    assert seen == [home]
 
 
 def test_main_rejects_an_unknown_command(capsys):
