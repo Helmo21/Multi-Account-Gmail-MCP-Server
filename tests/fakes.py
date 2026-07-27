@@ -97,13 +97,21 @@ class FakeDrafts:
 
 
 class FakeLabels:
-    def __init__(self, labels=None):
+    def __init__(self, labels=None, unread_counts=None):
         self.labels = labels or []
+        self.unread_counts = unread_counts or {}
         self.list_calls: list[dict] = []
+        self.get_calls: list[dict] = []
 
     def list(self, *, userId):
         self.list_calls.append({"userId": userId})
         return FakeRequest({"labels": self.labels})
+
+    def get(self, *, userId, id):
+        self.get_calls.append({"userId": userId, "id": id})
+        if id not in self.unread_counts:
+            return FakeRequest(error=make_http_error(404, "Not Found"))
+        return FakeRequest({"id": id, "messagesUnread": self.unread_counts[id]})
 
 
 class FakeUsers:
