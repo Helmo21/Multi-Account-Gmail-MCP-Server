@@ -6,8 +6,9 @@ import base64
 from dataclasses import dataclass
 from email.message import EmailMessage
 from enum import StrEnum
+from types import MappingProxyType
 
-from gmail_mcp.config import Account
+from gmail_mcp.config import VALID_SEND_POLICIES, Account
 from gmail_mcp.gmail.client import execute
 from gmail_mcp.gmail.search import header
 
@@ -108,16 +109,20 @@ class SendAction(StrEnum):
     DRAFT = "draft"
 
 
-_GATE = {
+_GATE = MappingProxyType({
     ("send", False): SendAction.SEND,
     ("send", True): SendAction.SEND,
     ("confirm", False): SendAction.DRAFT,
     ("confirm", True): SendAction.SEND,
     ("draft_only", False): SendAction.DRAFT,
     ("draft_only", True): SendAction.DRAFT,
-}
+})
 
-_NOTES = {
+assert {policy for policy, _ in _GATE} == VALID_SEND_POLICIES, (
+    "_GATE is out of sync with gmail_mcp.config.VALID_SEND_POLICIES"
+)
+
+_NOTES = MappingProxyType({
     "confirm": (
         "Account policy is 'confirm', so this was saved as a draft. "
         "Call again with confirm=true to send it."
@@ -127,7 +132,7 @@ _NOTES = {
         "and will never be sent by this server."
     ),
     "send": "Saved as a draft because a draft was explicitly requested.",
-}
+})
 
 
 def resolve_send_action(policy: str, confirm: bool) -> SendAction:
@@ -135,9 +140,23 @@ def resolve_send_action(policy: str, confirm: bool) -> SendAction:
 
     The decision lives here rather than in prompt text so it holds
     regardless of what the model has been told in conversation.
+
+    ``confirm`` must be an actual ``bool``. It is deliberately not
+    coerced: a loosely-typed caller (an MCP tool argument filled in by
+    a model, for instance) could pass a truthy-but-wrong value like
+    the string ``"false"``, and coercion would silently transmit mail
+    that was never actually confirmed. Every other unexpected input to
+    this function fails closed (an unknown policy raises); this keeps
+    that property for ``confirm`` too, rather than treating it as the
+    one fail-open input in the gate.
     """
+    if not isinstance(confirm, bool):
+        raise ValueError(
+            f"confirm must be a boolean, got {type(confirm).__name__}. "
+            "Refusing to interpret it as a confirmation."
+        )
     try:
-        return _GATE[(policy, bool(confirm))]
+        return _GATE[(policy, confirm)]
     except KeyError:
         raise ValueError(
             f"Unknown send policy {policy!r}. "
@@ -167,11 +186,11 @@ def compose_and_deliver(
     service,
     account: Account,
     *,
-    to,
+    to: Recipients,
     subject: str | None,
     body: str,
-    cc=None,
-    bcc=None,
+    cc: Recipients | None = None,
+    bcc: Recipients | None = None,
     reply_to_message_id: str | None = None,
     confirm: bool = False,
     force_draft: bool = False,
@@ -203,6 +222,7 @@ def compose_and_deliver(
     thread_id = context.thread_id if context else None
 
     action = resolve_send_action(account.send_policy, confirm)
+    overridden_by_force_draft = force_draft and action is SendAction.SEND
     if force_draft:
         action = SendAction.DRAFT
 
@@ -218,12 +238,17 @@ def compose_and_deliver(
         }
 
     draft = _create_draft(service, raw, thread_id)
+    note = (
+        _NOTES["send"]
+        if overridden_by_force_draft
+        else _NOTES[account.send_policy]
+    )
     return {
         "action": "drafted",
         "policy": account.send_policy,
         "account": account.alias,
         "draft_id": draft.get("id", ""),
-        "note": _NOTES[account.send_policy],
+        "note": note,
     }
 
 

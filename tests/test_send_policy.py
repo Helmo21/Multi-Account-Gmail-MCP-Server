@@ -1,3 +1,6 @@
+import base64
+from email import message_from_bytes
+
 import pytest
 
 from gmail_mcp.config import Account
@@ -32,6 +35,20 @@ def test_policy_gate_truth_table(policy, confirm, expected):
 def test_unknown_policy_is_rejected_rather_than_defaulted():
     with pytest.raises(ValueError, match="anything-goes"):
         resolve_send_action("anything-goes", True)
+
+
+@pytest.mark.parametrize("bad_confirm", ["false", "true", "no", 1, [0], {}])
+def test_non_boolean_confirm_is_rejected_rather_than_coerced(bad_confirm):
+    with pytest.raises(ValueError, match="boolean"):
+        resolve_send_action("confirm", bad_confirm)
+
+
+def test_string_false_confirm_does_not_resolve_to_send():
+    # bool("false") is True in Python. If the gate coerced instead of
+    # validating, this would silently resolve to SendAction.SEND on a
+    # confirm-policy account. It must raise instead, never return SEND.
+    with pytest.raises(ValueError):
+        resolve_send_action("confirm", "false")
 
 
 def test_send_policy_transmits_immediately():
@@ -90,17 +107,37 @@ def test_draft_only_policy_never_sends_even_when_confirmed():
     assert "draft_only" in result["note"]
 
 
-def test_force_draft_overrides_a_send_policy():
+@pytest.mark.parametrize("policy", ["send", "confirm", "draft_only"])
+def test_force_draft_overrides_any_policy(policy):
     messages = FakeMessages()
     service = FakeGmail(messages=messages, drafts=FakeDrafts())
 
     result = compose_and_deliver(
-        service, account("send"), to="b@example.com", subject="Hi",
-        body="x", force_draft=True,
+        service, account(policy), to="b@example.com", subject="Hi",
+        body="x", force_draft=True, confirm=True,
     )
 
     assert result["action"] == "drafted"
     assert messages.sent == []
+
+
+def test_force_draft_note_reflects_the_actual_cause_not_the_policy():
+    # policy=confirm + confirm=True would send on its own; force_draft
+    # overrides that. The note must say a draft was requested, not repeat
+    # the confirm-policy instruction ("call again with confirm=true") --
+    # the caller already did that, so repeating it invites an agent to
+    # loop forever re-sending the same confirmed request.
+    messages = FakeMessages()
+    service = FakeGmail(messages=messages, drafts=FakeDrafts())
+
+    result = compose_and_deliver(
+        service, account("confirm"), to="b@example.com", subject="Hi",
+        body="x", confirm=True, force_draft=True,
+    )
+
+    assert result["action"] == "drafted"
+    assert "confirm=true" not in result["note"]
+    assert "explicitly requested" in result["note"]
 
 
 def test_reply_sets_threading_headers_and_thread_id():
@@ -125,9 +162,6 @@ def test_reply_sets_threading_headers_and_thread_id():
     body = messages.sent[0]
     assert body["threadId"] == "t-9"
 
-    import base64
-    from email import message_from_bytes
-
     mime = message_from_bytes(base64.urlsafe_b64decode(body["raw"].encode()))
     assert mime["In-Reply-To"] == "<abc@example.com>"
     assert mime["Subject"] == "Re: Numbers"
@@ -147,9 +181,6 @@ def test_explicit_subject_wins_over_derived_reply_subject():
         body="x", reply_to_message_id="m1",
     )
 
-    import base64
-    from email import message_from_bytes
-
     mime = message_from_bytes(
         base64.urlsafe_b64decode(messages.sent[0]["raw"].encode())
     )
@@ -162,6 +193,32 @@ def test_new_message_without_subject_is_rejected():
             FakeGmail(), account("send"), to="b@example.com",
             subject=None, body="x",
         )
+
+
+def test_non_boolean_confirm_does_not_transmit():
+    messages = FakeMessages()
+    service = FakeGmail(messages=messages, drafts=FakeDrafts())
+
+    with pytest.raises(ValueError):
+        compose_and_deliver(
+            service, account("confirm"), to="b@example.com",
+            subject="Hi", body="x", confirm="false",
+        )
+
+    assert messages.sent == []
+
+
+def test_invalid_policy_raises_before_transmitting():
+    messages = FakeMessages()
+    service = FakeGmail(messages=messages, drafts=FakeDrafts())
+
+    with pytest.raises(ValueError, match="bogus"):
+        compose_and_deliver(
+            service, account("bogus"), to="b@example.com",
+            subject="Hi", body="x", confirm=True,
+        )
+
+    assert messages.sent == []
 
 
 def test_send_existing_draft_respects_confirm_policy():
