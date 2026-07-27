@@ -172,3 +172,43 @@ def test_read_thread_missing_id_raises_not_found():
     service = FakeGmail(threads=FakeThreads(threads={}))
     with pytest.raises(NotFoundError):
         read_thread(service, "nope")
+
+
+def test_thread_message_with_large_quoted_history_collapsed_below_limit():
+    """Large quoted history that collapses below limit should not truncate."""
+    first = message("m1")
+    second = message("m2")
+    # Reply text is small, but quoted history is large (close to limit)
+    quoted_history = "x" * (BODY_CHAR_LIMIT - 500)
+    second["payload"]["body"]["data"] = b64(
+        "My short reply\n\nOn Mon someone wrote:\n> " + quoted_history
+    )
+    service = FakeGmail(
+        threads=FakeThreads(threads={"t-1": {"id": "t-1",
+                                             "messages": [first, second]}})
+    )
+
+    result = read_thread(service, "t-1")
+
+    # After collapsing, should just be the reply text
+    assert result["messages"][1]["body"] == "My short reply"
+    assert "truncated" not in result["messages"][1]["body"]
+
+
+def test_thread_message_with_body_over_limit_after_collapsing():
+    """Body that exceeds limit even after collapsing should include notice."""
+    first = message("m1")
+    second = message("m2")
+    # Large reply text that stays after collapsing
+    large_reply = "y" * (BODY_CHAR_LIMIT + 1000)
+    second["payload"]["body"]["data"] = b64(large_reply)
+    service = FakeGmail(
+        threads=FakeThreads(threads={"t-1": {"id": "t-1",
+                                             "messages": [first, second]}})
+    )
+
+    result = read_thread(service, "t-1")
+
+    # Should be truncated with notice
+    assert len(result["messages"][1]["body"]) < BODY_CHAR_LIMIT + 200
+    assert "truncated" in result["messages"][1]["body"]

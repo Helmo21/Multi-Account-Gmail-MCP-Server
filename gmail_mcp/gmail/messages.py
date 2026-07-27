@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import html
 import re
 
@@ -19,10 +20,13 @@ _QUOTE_MARKERS = (
 
 
 def _decode(data: str) -> str:
-    padded = data + "=" * (-len(data) % 4)
-    return base64.urlsafe_b64decode(padded.encode()).decode(
-        "utf-8", errors="replace"
-    )
+    try:
+        padded = data + "=" * (-len(data) % 4)
+        return base64.urlsafe_b64decode(padded.encode()).decode(
+            "utf-8", errors="replace"
+        )
+    except binascii.Error:
+        return ""
 
 
 def html_to_text(source: str) -> str:
@@ -62,8 +66,8 @@ def _part_text(node: dict) -> str:
     return _decode(data) if data else ""
 
 
-def extract_body(payload: dict) -> str:
-    """Return the readable body, preferring text/plain over HTML."""
+def _extract_body_raw(payload: dict) -> str:
+    """Extract the readable body without truncation, preferring text/plain over HTML."""
     plain, rich = "", ""
     for node in _walk(payload):
         if node.get("filename"):
@@ -74,11 +78,19 @@ def extract_body(payload: dict) -> str:
         elif mime == "text/html" and not rich:
             rich = _part_text(node)
 
-    body = plain or (html_to_text(rich) if rich else "")
+    return plain or (html_to_text(rich) if rich else "")
 
+
+def _apply_truncation(body: str) -> str:
+    """Apply character limit and append truncation notice if needed."""
     if len(body) > BODY_CHAR_LIMIT:
-        body = body[:BODY_CHAR_LIMIT] + "\n\n[body truncated]"
+        return body[:BODY_CHAR_LIMIT] + "\n\n[body truncated]"
     return body
+
+
+def extract_body(payload: dict) -> str:
+    """Return the readable body, preferring text/plain over HTML."""
+    return _apply_truncation(_extract_body_raw(payload))
 
 
 def list_attachments(payload: dict) -> list[dict]:
@@ -96,9 +108,15 @@ def list_attachments(payload: dict) -> list[dict]:
 
 def _render(message: dict, *, collapse: bool) -> dict:
     payload = message.get("payload", {})
-    body = extract_body(payload)
     record = summarise(message)
-    record["body"] = collapse_quoted(body) if collapse else body
+    if collapse:
+        # Extract raw, collapse, then apply limit
+        raw_body = _extract_body_raw(payload)
+        collapsed_body = collapse_quoted(raw_body)
+        record["body"] = _apply_truncation(collapsed_body)
+    else:
+        # Extract with limit already applied
+        record["body"] = extract_body(payload)
     record["message_id_header"] = header(payload, "Message-ID")
     record["attachments"] = list_attachments(payload)
     return record
