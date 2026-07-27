@@ -1,8 +1,10 @@
+import asyncio
+
 import pytest
 
 from gmail_mcp.config import Account, Config
 from gmail_mcp.server import Runtime, create_server
-from tests.fakes import FakeGmail, FakeLabels, FakeMessages, FakeThreads
+from tests.fakes import FakeDrafts, FakeGmail, FakeLabels, FakeMessages, FakeThreads
 
 LABELS = [
     {"id": "INBOX", "name": "INBOX", "type": "system"},
@@ -66,6 +68,23 @@ def runtime(service):
 
 def tools(service):
     return create_server(runtime(service)).tool_functions
+
+
+def server_for(service):
+    """Return the raw FastMCP server, for tests that need real MCP-layer
+    argument validation (pydantic) rather than the direct-call bypass
+    that ``tools()`` exercises.
+    """
+    return create_server(runtime(service))
+
+
+def call_over_mcp(server, name, arguments):
+    """Invoke a tool the way an MCP client would: through
+    ``FastMCP.call_tool``, so pydantic's argument validation actually
+    runs. ``tools()[name](...)`` calls the closure directly and skips
+    this layer entirely.
+    """
+    return asyncio.run(server.call_tool(name, arguments))
 
 
 def test_list_accounts_exposes_aliases_and_policies():
@@ -191,3 +210,139 @@ def test_all_ten_tools_are_registered():
         "modify_labels",
         "check_inboxes",
     }
+
+
+# --- Regression coverage: strict `confirm` validation over the real MCP
+# call path. `tools()[...]` calls the tool closures directly and skips
+# FastMCP's pydantic argument validation entirely, so it cannot catch a
+# regression here -- only `server.call_tool` (invoked through
+# `call_over_mcp`) exercises the layer that actually parses arguments
+# coming from a model. This is exactly the gap the review caught: the
+# `isinstance(confirm, bool)` check in `resolve_send_action` never ran
+# for MCP callers because pydantic's lax mode had already coerced
+# strings like "true"/"false" and ints like 1/0 to a real bool before
+# the tool function's body executed.
+
+
+@pytest.mark.parametrize("bad_confirm", ["true", "false", "yes", "no", 1, 0])
+def test_send_message_confirm_rejects_non_boolean_over_mcp(bad_confirm):
+    messages = FakeMessages()
+    server = server_for(FakeGmail(messages=messages))
+
+    with pytest.raises(Exception) as exc:
+        call_over_mcp(
+            server,
+            "send_message",
+            {
+                "account": "personal",
+                "to": "b@example.com",
+                "subject": "Hi",
+                "body": "x",
+                "confirm": bad_confirm,
+            },
+        )
+
+    assert "boolean" in str(exc.value).lower()
+    assert messages.sent == []
+
+
+@pytest.mark.parametrize("bad_confirm", ["true", "false", 1, 0])
+def test_send_draft_confirm_rejects_non_boolean_over_mcp(bad_confirm):
+    drafts = FakeDrafts(drafts={"d1": {}})
+    server = server_for(FakeGmail(drafts=drafts))
+
+    with pytest.raises(Exception) as exc:
+        call_over_mcp(
+            server,
+            "send_draft",
+            {"account": "personal", "draft_id": "d1", "confirm": bad_confirm},
+        )
+
+    assert "boolean" in str(exc.value).lower()
+    assert drafts.sent == []
+
+
+def test_send_message_confirm_still_accepts_real_booleans_over_mcp():
+    messages = FakeMessages()
+    server = server_for(FakeGmail(messages=messages))
+
+    call_over_mcp(
+        server,
+        "send_message",
+        {
+            "account": "personal",
+            "to": "b@example.com",
+            "subject": "Hi",
+            "body": "x",
+            "confirm": True,
+        },
+    )
+
+    assert len(messages.sent) == 1
+
+
+# --- Coverage gaps flagged in review: five of ten tools had no test
+# exercising their argument plumbing. Each of these is small on purpose
+# -- it only needs to prove the keyword reaches the underlying layer.
+
+
+def test_search_mail_passes_max_results_and_include_spam_trash_through():
+    messages = FakeMessages(listing={"messages": []})
+    tools(FakeGmail(messages=messages))["search_mail"](
+        account="personal",
+        query="x",
+        max_results=5,
+        include_spam_trash=True,
+    )
+
+    call = messages.list_calls[-1]
+    assert call["maxResults"] == 5
+    assert call["includeSpamTrash"] is True
+
+
+def test_modify_labels_targets_a_thread_when_thread_id_is_given():
+    threads = FakeThreads()
+    service = FakeGmail(threads=threads, labels=FakeLabels(LABELS))
+
+    result = tools(service)["modify_labels"](
+        account="personal", thread_id="t-1", remove=["UNREAD"]
+    )
+
+    assert threads.modified[0][0] == "t-1"
+    assert threads.modified[0][1]["removeLabelIds"] == ["UNREAD"]
+    assert result["target"] == "thread"
+
+
+def test_check_inboxes_accepts_an_explicit_subset_of_aliases():
+    messages = FakeMessages(listing={"messages": []})
+    result = tools(FakeGmail(messages=messages))["check_inboxes"](
+        accounts=["work"]
+    )
+
+    assert [a["alias"] for a in result["accounts"]] == ["work"]
+
+
+def test_create_draft_reply_threads_off_the_original_message():
+    messages = FakeMessages(messages={"m1": message(subject="Original")})
+    drafts = FakeDrafts()
+    service = FakeGmail(messages=messages, drafts=drafts)
+
+    result = tools(service)["create_draft"](
+        account="personal",
+        to="b@example.com",
+        body="x",
+        reply_to_message_id="m1",
+    )
+
+    assert result["action"] == "drafted"
+    assert drafts.created[0]["message"]["threadId"] == "t-1"
+
+
+def test_send_draft_sends_an_existing_draft_for_a_send_policy_account():
+    drafts = FakeDrafts(drafts={"d1": {}})
+    service = FakeGmail(drafts=drafts)
+
+    result = tools(service)["send_draft"](account="work", draft_id="d1")
+
+    assert result["action"] == "sent"
+    assert drafts.sent == [{"id": "d1"}]

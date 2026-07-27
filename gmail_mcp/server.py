@@ -8,8 +8,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Annotated, Protocol
 
 from mcp.server.fastmcp import FastMCP
+from pydantic import Field
 
 from gmail_mcp.check import DEFAULT_MAX_PER_ACCOUNT, check_inboxes
 from gmail_mcp.config import Account, Config, config_dir, load_config
@@ -23,18 +25,42 @@ from gmail_mcp.storage import TokenStore, WatermarkStore
 
 Recipients = str | list[str]
 
+# FastMCP validates tool arguments with pydantic in lax mode, which
+# coerces strings and ints to bool (e.g. "true" or 1 -> True) before the
+# function body ever runs. That silently defeats the strict isinstance
+# check in resolve_send_action, which exists specifically so a
+# non-boolean confirm can never be interpreted as confirmation. Marking
+# the field strict here makes pydantic itself reject anything that is
+# not a literal boolean, so the rejection happens at the MCP boundary
+# rather than relying on downstream coercion happening to be safe.
+StrictConfirm = Annotated[bool, Field(strict=True)]
+
+
+class ServiceCacheProtocol(Protocol):
+    """The seam Runtime.service relies on: one Gmail service per alias."""
+
+    def get(self, alias: str): ...
+
+
+class WatermarkStoreProtocol(Protocol):
+    """The seam check_inboxes relies on for per-account watermarks."""
+
+    def get(self, alias: str) -> int | None: ...
+
+    def set(self, alias: str, value: int) -> None: ...
+
 
 @dataclass
 class Runtime:
     config: Config
-    token_store: object
-    watermarks: object
-    services: object
+    token_store: TokenStore | None
+    watermarks: WatermarkStoreProtocol
+    services: ServiceCacheProtocol
 
     def account(self, alias: str) -> Account:
         return self.config.get(alias)
 
-    def service(self, alias: str):
+    def service(self, alias: str) -> object:
         return self.services.get(alias)
 
 
@@ -79,6 +105,7 @@ def create_server(runtime: Runtime) -> FastMCP:
         example `is:unread from:boss@example.com newer_than:2d`. Prefer a
         precise query over fetching broadly and filtering afterwards.
         Message IDs returned here are only valid for this account.
+        `max_results` must be at least 1.
         """
         runtime.account(account)
         return search_messages(
@@ -141,7 +168,7 @@ def create_server(runtime: Runtime) -> FastMCP:
         cc: Recipients | None = None,
         bcc: Recipients | None = None,
         reply_to_message_id: str | None = None,
-        confirm: bool = False,
+        confirm: StrictConfirm = False,
     ) -> dict:
         """Send a message, subject to the account's send policy.
 
@@ -149,8 +176,8 @@ def create_server(runtime: Runtime) -> FastMCP:
         a draft otherwise. A `draft_only` account never transmits. Check
         the `action` field of the result to see what actually happened:
         the message may have been drafted instead of sent. `confirm` must
-        be a literal boolean; anything else is rejected rather than
-        guessed at.
+        be a literal boolean (`true`/`false`); anything else, including a
+        quoted `"true"` or a number, is rejected rather than guessed at.
         """
         target = runtime.account(account)
         return compose_and_deliver(
@@ -165,11 +192,14 @@ def create_server(runtime: Runtime) -> FastMCP:
             confirm=confirm,
         )
 
-    def send_draft(account: str, draft_id: str, confirm: bool = False) -> dict:
+    def send_draft(
+        account: str, draft_id: str, confirm: StrictConfirm = False
+    ) -> dict:
         """Send an existing draft, subject to the same send policy.
 
         `draft_id` is account-scoped. `confirm` must be a literal
-        boolean; see `send_message` for the policy semantics.
+        boolean (`true`/`false`), not a quoted string or a number; see
+        `send_message` for the policy semantics.
         """
         target = runtime.account(account)
         return send_existing_draft(
@@ -177,7 +207,11 @@ def create_server(runtime: Runtime) -> FastMCP:
         )
 
     def list_labels(account: str) -> list[dict]:
-        """List every label on one mailbox."""
+        """List every label on one mailbox.
+
+        Use this to discover the valid label names to pass to
+        `modify_labels`'s `add` and `remove` arguments.
+        """
         runtime.account(account)
         return labels_module.list_labels(runtime.service(account))
 
@@ -192,7 +226,8 @@ def create_server(runtime: Runtime) -> FastMCP:
 
         Use this to mark read or unread (the `UNREAD` label) and to
         archive (remove `INBOX`). Pass exactly one of `message_id` or
-        `thread_id`.
+        `thread_id`, and at least one label in `add` or `remove` -- use
+        `list_labels` first if the exact name is not already known.
         """
         runtime.account(account)
         return labels_module.modify_labels(
