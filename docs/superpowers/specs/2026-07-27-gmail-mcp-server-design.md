@@ -130,6 +130,21 @@ have to sit beside the ciphertext. That is ceremony rather than security. A
 `0600` file is the honest equivalent, and the keyring is the real answer
 wherever one exists.
 
+**The backend is chosen once, at construction, and never switched.** An
+earlier draft let a keyring failure silently degrade to the file mid-session.
+That strands tokens: anything already written to the keyring becomes
+invisible, every account reports as unauthenticated, and a re-authentication
+then writes to the file while the keyring still holds the old value — so a
+later run with a working keyring reads the stale one. Instead, a keyring that
+becomes unavailable raises `StorageError` naming the alias. Failing loudly is
+better than reporting five healthy mailboxes as unauthenticated.
+
+Both stores serialise their file-backend writes through one process-wide lock,
+because the scheduled sweep refreshes tokens from several threads at once and
+the write is a read-modify-write through a shared temporary file.
+Cross-process coordination is out of scope: one server, one CLI, run by one
+person.
+
 Refresh is automatic: on each call, an expired access token is refreshed and the
 updated credential written back to the store. **A dead credential fails one
 account, never the server.** A revoked refresh token produces a structured error
@@ -192,6 +207,14 @@ Each account declares one of three policies in config, enforced in code:
 
 There is no default policy: every account must declare one, and config
 validation fails on a missing or unrecognised value rather than guessing.
+
+**`confirm` must be a real boolean.** Coercing it would fail open: `bool()` of
+the string `"false"` is `True`, so a loosely-typed argument saying *no* would
+transmit. A non-boolean is refused rather than interpreted, at two levels —
+the gate itself rejects it, and the MCP tool declares the parameter strict,
+because the MCP framework skips schema validation and would otherwise
+lax-coerce `1` and `"yes"` to `True` before the gate ever ran. Refusing also
+surfaces the caller's mistake, where silently drafting would hide it.
 
 `send_draft` is gated identically, so the confirm workflow does not require
 recomposing the message.
