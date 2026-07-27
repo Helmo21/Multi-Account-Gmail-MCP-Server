@@ -24,6 +24,22 @@ def list_labels(service) -> list[dict]:
     ]
 
 
+def _resolve_names_with_mapping(
+    names: Sequence[str], by_name: dict[str, str], all_labels: list[dict]
+) -> list[str]:
+    """Resolve label names to IDs using a pre-built name-to-ID mapping."""
+    resolved = []
+    for name in names:
+        label_id = by_name.get(name.strip().lower())
+        if label_id is None:
+            available = ", ".join(sorted(label["name"] for label in all_labels))
+            raise GmailError(
+                f"No label named {name!r} on this account. Available: {available}."
+            )
+        resolved.append(label_id)
+    return resolved
+
+
 def resolve_label_ids(service, names: Sequence[str]) -> list[str]:
     """Map label names to Gmail label IDs, case-insensitively."""
     if not names:
@@ -31,17 +47,7 @@ def resolve_label_ids(service, names: Sequence[str]) -> list[str]:
 
     labels = list_labels(service)
     by_name = {label["name"].lower(): label["id"] for label in labels}
-
-    resolved = []
-    for name in names:
-        label_id = by_name.get(name.strip().lower())
-        if label_id is None:
-            available = ", ".join(sorted(label["name"] for label in labels))
-            raise GmailError(
-                f"No label named {name!r} on this account. Available: {available}."
-            )
-        resolved.append(label_id)
-    return resolved
+    return _resolve_names_with_mapping(names, by_name, labels)
 
 
 def modify_labels(
@@ -60,9 +66,12 @@ def modify_labels(
     if not add and not remove:
         raise ValueError("Pass at least one label to add or remove.")
 
+    labels = list_labels(service)
+    by_name = {label["name"].lower(): label["id"] for label in labels}
+
     body = {
-        "addLabelIds": resolve_label_ids(service, list(add)),
-        "removeLabelIds": resolve_label_ids(service, list(remove)),
+        "addLabelIds": _resolve_names_with_mapping(add, by_name, labels),
+        "removeLabelIds": _resolve_names_with_mapping(remove, by_name, labels),
     }
 
     if message_id:

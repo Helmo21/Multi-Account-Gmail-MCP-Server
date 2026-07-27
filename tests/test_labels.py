@@ -99,3 +99,39 @@ def test_returns_what_changed():
         "added": [],
         "removed": ["UNREAD"],
     }
+
+
+def test_modifies_labels_fetches_label_list_once_for_both_add_and_remove():
+    labels = FakeLabels(LABELS)
+    messages = FakeMessages(messages={"m1": {}})
+    service = FakeGmail(labels=labels, messages=messages)
+
+    modify_labels(service, message_id="m1", add=["Clients/Acme"], remove=["UNREAD"])
+
+    assert len(labels.list_calls) == 1
+
+
+def test_empty_string_message_id_with_thread_id_does_not_provide_two_targets():
+    threads = FakeThreads(threads={"t1": {}})
+    service = service_with_labels(threads=threads)
+
+    modify_labels(
+        service, message_id="", thread_id="t1", add=["INBOX"]
+    )
+
+    assert threads.modified == [
+        ("t1", {"addLabelIds": ["INBOX"], "removeLabelIds": []})
+    ]
+
+
+def test_empty_string_thread_id_with_message_id_does_not_provide_two_targets():
+    messages = FakeMessages(messages={"m1": {}})
+    service = service_with_labels(messages=messages)
+
+    modify_labels(
+        service, message_id="m1", thread_id="", add=["INBOX"]
+    )
+
+    assert messages.modified == [
+        ("m1", {"addLabelIds": ["INBOX"], "removeLabelIds": []})
+    ]

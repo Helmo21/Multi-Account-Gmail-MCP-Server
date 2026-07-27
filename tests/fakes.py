@@ -99,8 +99,10 @@ class FakeDrafts:
 class FakeLabels:
     def __init__(self, labels=None):
         self.labels = labels or []
+        self.list_calls: list[dict] = []
 
     def list(self, *, userId):
+        self.list_calls.append({"userId": userId})
         return FakeRequest({"labels": self.labels})
 
 
