@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from pathlib import Path
 
 import keyring as _keyring
@@ -11,6 +12,15 @@ import keyring as _keyring
 SERVICE_NAME = "gmail-mcp"
 _TOKEN_FILE = "tokens.json"
 _WATERMARK_FILE = "watermarks.json"
+
+# Guards the file-backend read-modify-write in TokenStore and
+# WatermarkStore. Both stage their update through a single fixed temp
+# path (`tokens.json.tmp` / `watermarks.json.tmp`) per store, so two
+# threads racing through it concurrently -- e.g. several accounts'
+# access tokens expiring in the same hourly sweep -- can otherwise lose
+# an update or hit a FileNotFoundError from a rename collision. This is
+# single-process scope only: it does not coordinate across processes.
+_LOCK = threading.Lock()
 
 
 class StorageError(Exception):
@@ -32,8 +42,13 @@ def _read_json(path: Path) -> dict:
 def _write_json_private(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2))
-    os.chmod(tmp, 0o600)
+    # Create the temp file already private (0600), rather than at the
+    # default umask and chmod-ing afterward: the latter leaves a window
+    # where the file exists world-readable with token JSON already
+    # written into it.
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(json.dumps(data, indent=2))
     tmp.replace(path)
 
 
@@ -89,9 +104,10 @@ class TokenStore:
                 raise StorageError(
                     f"Keyring backend unavailable for alias '{alias}': {exc}"
                 ) from exc
-        data = _read_json(self._file)
-        data[alias] = token_json
-        _write_json_private(self._file, data)
+        with _LOCK:
+            data = _read_json(self._file)
+            data[alias] = token_json
+            _write_json_private(self._file, data)
 
     def delete(self, alias: str) -> None:
         if self._uses_keyring:
@@ -102,9 +118,10 @@ class TokenStore:
                 raise StorageError(
                     f"Keyring backend unavailable for alias '{alias}': {exc}"
                 ) from exc
-        data = _read_json(self._file)
-        if data.pop(alias, None) is not None:
-            _write_json_private(self._file, data)
+        with _LOCK:
+            data = _read_json(self._file)
+            if data.pop(alias, None) is not None:
+                _write_json_private(self._file, data)
 
 
 class WatermarkStore:
@@ -118,6 +135,7 @@ class WatermarkStore:
         return value if isinstance(value, int) else None
 
     def set(self, alias: str, epoch_seconds: int) -> None:
-        data = _read_json(self._path)
-        data[alias] = int(epoch_seconds)
-        _write_json_private(self._path, data)
+        with _LOCK:
+            data = _read_json(self._path)
+            data[alias] = int(epoch_seconds)
+            _write_json_private(self._path, data)

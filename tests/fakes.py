@@ -42,12 +42,14 @@ class FakeMessages:
         self.modified: list[tuple[str, dict]] = []
         self.sent: list[dict] = []
         self.list_calls: list[dict] = []
+        self.get_calls: list[dict] = []
 
     def list(self, **kwargs):
         self.list_calls.append(kwargs)
         return FakeRequest(self.listing)
 
     def get(self, *, userId, id, **kwargs):
+        self.get_calls.append({"userId": userId, "id": id, **kwargs})
         if id not in self.messages:
             return FakeRequest(error=make_http_error(404, "Not Found"))
         return FakeRequest(self.messages[id])

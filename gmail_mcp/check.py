@@ -156,6 +156,11 @@ def check_inboxes(
     read, moved out of the inbox, or the account catches up). That mail
     is not lost -- raising ``max_per_account`` recovers it immediately --
     but it will not appear unprompted while the backlog persists.
+
+    Separately, the ``after:`` operator's boundary has only second
+    granularity, so a message arriving in the same second as the stored
+    watermark can be skipped or duplicated on the next sweep, depending
+    on Gmail's own inclusive/exclusive semantics for that second.
     """
     now = now if now is not None else int(time.time())
 

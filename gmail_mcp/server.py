@@ -47,7 +47,7 @@ class WatermarkStoreProtocol(Protocol):
 
     def get(self, alias: str) -> int | None: ...
 
-    def set(self, alias: str, value: int) -> None: ...
+    def set(self, alias: str, epoch_seconds: int) -> None: ...
 
 
 @dataclass
@@ -249,7 +249,10 @@ def create_server(runtime: Runtime) -> FastMCP:
         the previous call is reported, so repeated runs do not repeat
         themselves. Accounts that fail are reported inline with an
         `error` field while the rest still return.
+        `max_per_account` must be at least 1.
         """
+        if max_per_account < 1:
+            raise ValueError("max_per_account must be at least 1.")
         return check_inboxes(
             runtime.config,
             runtime.services,

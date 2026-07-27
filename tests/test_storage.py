@@ -1,6 +1,7 @@
 import json
 import stat
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -189,6 +190,27 @@ def test_keyring_failure_on_set_raises_storage_error(tmp_path):
 
     # Anti-stranding: no fallback file created
     assert not (tmp_path / "tokens.json").exists()
+
+
+def test_concurrent_set_across_aliases_does_not_lose_updates(tmp_path):
+    # Real file-backend TokenStore (BrokenKeyring forces the fallback),
+    # exercised the way check.py's thread pool actually hits it: several
+    # aliases' TokenStore.set calls landing at the same time because
+    # their access tokens expired in the same sweep. Every alias's write
+    # must survive -- unsynchronized, this shared-temp-path
+    # read-modify-write can silently drop an update or raise
+    # FileNotFoundError from a rename collision.
+    store = TokenStore(tmp_path, keyring_module=BrokenKeyring())
+    aliases = [f"acct{i}" for i in range(8)]
+
+    def write(alias):
+        store.set(alias, json.dumps({"token": alias}))
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(write, aliases))
+
+    for alias in aliases:
+        assert store.get(alias) == json.dumps({"token": alias})
 
 
 def test_keyring_failure_on_delete_raises_storage_error(tmp_path):

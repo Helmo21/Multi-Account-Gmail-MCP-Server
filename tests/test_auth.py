@@ -96,6 +96,19 @@ def test_revoked_credential_names_the_alias_and_the_fix():
     assert "gmail-mcp auth add work-sales" in message
 
 
+def test_expired_credential_with_no_refresh_token_is_revoked():
+    creds = FakeCreds(valid=False, expired=True, refresh_token=None)
+    store = MemoryStore({"personal": "{}"})
+
+    with pytest.raises(CredentialRevokedError) as exc:
+        load_credentials("personal", store, loader=lambda i, s: creds)
+
+    message = str(exc.value)
+    assert "personal" in message
+    assert "gmail-mcp auth add personal" in message
+    assert creds.refreshed is False
+
+
 def test_authenticate_saves_token_when_email_matches(tmp_path):
     account = Account(alias="personal", email="me@example.com", send_policy="send")
     store = MemoryStore()

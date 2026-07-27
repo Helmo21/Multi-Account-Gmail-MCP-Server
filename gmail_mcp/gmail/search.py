@@ -6,7 +6,7 @@ from gmail_mcp.gmail.client import NotFoundError, execute
 
 DEFAULT_MAX_RESULTS = 20
 MAX_RESULTS_CAP = 100
-METADATA_HEADERS = ["From", "To", "Subject", "Date"]
+METADATA_HEADERS = ("From", "To", "Subject", "Date")
 
 
 def header(payload: dict, name: str) -> str:

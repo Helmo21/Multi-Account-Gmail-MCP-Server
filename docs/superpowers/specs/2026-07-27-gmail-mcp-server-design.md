@@ -225,9 +225,13 @@ context in hand. If summaries prove noisy in practice, restricting the query to
 Gmail's own `is:important` signal is a one-line change.
 
 The watermark is the most recent reported message time per account, persisted
-in the config directory, and **advances only for accounts whose query
-succeeded**. With no watermark — first run, or a newly added account — the tool
-looks back 24 hours rather than dumping years of accumulated unread mail.
+in the config directory, and **advances to the newest reported message once
+everything new has actually been returned**. With no watermark — first run, or
+a newly added account — the tool looks back 24 hours rather than dumping years
+of accumulated unread mail. A failed, empty, or truncated *first* run still
+persists that frozen 24-hour boundary rather than leaving the watermark unset,
+so the lookback window does not silently slide forward with the clock and skip
+mail that fell inside the original window.
 
 Accounts are queried in parallel. Metadata-only fetches should keep a full
 five-account sweep to a few seconds, which matters for a tool that fires on a

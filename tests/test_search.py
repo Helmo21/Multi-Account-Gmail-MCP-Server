@@ -2,6 +2,8 @@ import pytest
 
 from gmail_mcp.gmail.search import (
     MAX_RESULTS_CAP,
+    METADATA_HEADERS,
+    fetch_metadata,
     header,
     search_messages,
     summarise,
@@ -109,6 +111,19 @@ def test_max_results_below_one_is_rejected():
 def test_empty_listing_returns_empty_list():
     service = FakeGmail(messages=FakeMessages(listing={}))
     assert search_messages(service, "x") == []
+
+
+def test_fetch_metadata_requests_metadata_only_with_the_expected_headers():
+    # A regression to full-body fetches would pass every other test in
+    # the suite while quietly destroying check_inboxes' speed budget --
+    # this is the only assertion that pins the actual request shape.
+    messages = FakeMessages(messages={"m1": metadata("m1")})
+
+    fetch_metadata(FakeGmail(messages=messages), ["m1"])
+
+    call = messages.get_calls[0]
+    assert call["format"] == "metadata"
+    assert call["metadataHeaders"] == METADATA_HEADERS
 
 
 def test_message_vanishing_between_list_and_get_is_skipped():

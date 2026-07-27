@@ -118,9 +118,12 @@ _GATE = MappingProxyType({
     ("draft_only", True): SendAction.DRAFT,
 })
 
-assert {policy for policy, _ in _GATE} == VALID_SEND_POLICIES, (
-    "_GATE is out of sync with gmail_mcp.config.VALID_SEND_POLICIES"
-)
+if {policy for policy, _ in _GATE} != VALID_SEND_POLICIES:
+    # A plain `assert` is stripped under `python -O`, which would let
+    # this drift guard silently stop protecting the send-policy gate.
+    raise RuntimeError(
+        "_GATE is out of sync with gmail_mcp.config.VALID_SEND_POLICIES"
+    )
 
 _NOTES = MappingProxyType({
     "confirm": (

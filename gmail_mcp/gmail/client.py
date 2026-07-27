@@ -65,8 +65,13 @@ def _default_service_builder(creds):
 class ServiceCache:
     """One Gmail service per alias, built lazily and kept for the process.
 
-    Each alias gets its own service object with its own HTTP transport,
-    which is what makes the per-account parallelism in check.py safe.
+    Each alias's service object owns its own HTTP transport, so the
+    concurrent Gmail API calls check.py makes across accounts never
+    share a connection. Construction is not similarly isolated -- every
+    alias's first `get()` reads and writes through the same shared
+    TokenStore -- but that store serialises its own file-backend
+    read-modify-writes internally (see gmail_mcp.storage._LOCK), so
+    concurrent construction is safe for that reason, not this one.
     """
 
     def __init__(
