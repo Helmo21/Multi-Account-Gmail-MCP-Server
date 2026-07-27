@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-from gmail_mcp.storage import SERVICE_NAME, TokenStore, WatermarkStore
+from gmail_mcp.storage import SERVICE_NAME, StorageError, TokenStore, WatermarkStore
 
 
 class FakeKeyring:
@@ -41,6 +41,33 @@ class BrokenKeyring(FakeKeyring):
 
     def delete_password(self, service, username):
         raise RuntimeError("no backend")
+
+
+class LateFailingKeyring(FakeKeyring):
+    """Keyring that works on probe but fails on later operations.
+
+    Simulates D-Bus restart, session lock, or similar transient failures
+    that happen after successful initialization.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.fail_after_probe = False
+
+    def get_password(self, service, username):
+        if self.fail_after_probe and username != "__probe__":
+            raise RuntimeError("keyring became unavailable")
+        return super().get_password(service, username)
+
+    def set_password(self, service, username, password):
+        if self.fail_after_probe:
+            raise RuntimeError("keyring became unavailable")
+        return super().set_password(service, username, password)
+
+    def delete_password(self, service, username):
+        if self.fail_after_probe:
+            raise RuntimeError("keyring became unavailable")
+        return super().delete_password(service, username)
 
 
 def test_roundtrips_through_keyring(tmp_path):
@@ -125,3 +152,54 @@ def test_watermark_survives_corrupt_file(tmp_path):
     assert marks.get("personal") is None
     marks.set("personal", 5)
     assert marks.get("personal") == 5
+
+
+def test_token_store_handles_corrupt_file(tmp_path):
+    """TokenStore gracefully handles corrupted tokens.json, like WatermarkStore does."""
+    (tmp_path / "tokens.json").write_text("not json{{")
+    store = TokenStore(tmp_path, keyring_module=BrokenKeyring())
+
+    assert store.get("personal") is None
+    store.set("personal", "x")
+    assert store.get("personal") == "x"
+
+
+def test_keyring_failure_on_get_raises_storage_error(tmp_path):
+    """When keyring backend becomes unavailable, get() raises StorageError."""
+    kr = LateFailingKeyring()
+    store = TokenStore(tmp_path, keyring_module=kr)
+    store.set("personal", "x")
+
+    kr.fail_after_probe = True
+    with pytest.raises(StorageError, match="Keyring backend unavailable"):
+        store.get("personal")
+
+    # Anti-stranding: no fallback file created
+    assert not (tmp_path / "tokens.json").exists()
+
+
+def test_keyring_failure_on_set_raises_storage_error(tmp_path):
+    """When keyring backend becomes unavailable, set() raises StorageError."""
+    kr = LateFailingKeyring()
+    store = TokenStore(tmp_path, keyring_module=kr)
+
+    kr.fail_after_probe = True
+    with pytest.raises(StorageError, match="Keyring backend unavailable"):
+        store.set("personal", "x")
+
+    # Anti-stranding: no fallback file created
+    assert not (tmp_path / "tokens.json").exists()
+
+
+def test_keyring_failure_on_delete_raises_storage_error(tmp_path):
+    """When keyring backend becomes unavailable, delete() raises StorageError."""
+    kr = LateFailingKeyring()
+    store = TokenStore(tmp_path, keyring_module=kr)
+    store.set("personal", "x")
+
+    kr.fail_after_probe = True
+    with pytest.raises(StorageError, match="Keyring backend unavailable"):
+        store.delete("personal")
+
+    # Anti-stranding: no fallback file created
+    assert not (tmp_path / "tokens.json").exists()

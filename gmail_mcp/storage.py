@@ -13,6 +13,12 @@ _TOKEN_FILE = "tokens.json"
 _WATERMARK_FILE = "watermarks.json"
 
 
+class StorageError(Exception):
+    """Raised when the chosen token storage backend becomes unavailable."""
+
+    pass
+
+
 def _read_json(path: Path) -> dict:
     if not path.exists():
         return {}
@@ -34,6 +40,9 @@ def _write_json_private(path: Path, data: dict) -> None:
 class TokenStore:
     """Stores opaque token JSON in the OS keyring, or a 0600 file.
 
+    Backend is chosen once at construction and never changes. If the probe
+    succeeds, the keyring is the backend. If it fails, the file is the backend.
+
     The fallback is deliberately not encrypted: the server starts
     unattended and can never prompt for a passphrase, so any key would
     have to sit beside the ciphertext.
@@ -42,7 +51,7 @@ class TokenStore:
     def __init__(self, config_dir: Path, keyring_module=_keyring):
         self._dir = Path(config_dir)
         self._keyring = keyring_module
-        self._usable = self._probe()
+        self._uses_keyring = self._probe()
 
     def _probe(self) -> bool:
         try:
@@ -57,36 +66,42 @@ class TokenStore:
 
     @property
     def backend_name(self) -> str:
-        if self._usable:
+        if self._uses_keyring:
             return f"keyring:{self._keyring.get_keyring()}"
         return f"file:{self._file}"
 
     def get(self, alias: str) -> str | None:
-        if self._usable:
+        if self._uses_keyring:
             try:
                 return self._keyring.get_password(SERVICE_NAME, alias)
-            except Exception:
-                self._usable = False
+            except Exception as exc:
+                raise StorageError(
+                    f"Keyring backend unavailable for alias '{alias}': {exc}"
+                ) from exc
         return _read_json(self._file).get(alias)
 
     def set(self, alias: str, token_json: str) -> None:
-        if self._usable:
+        if self._uses_keyring:
             try:
                 self._keyring.set_password(SERVICE_NAME, alias, token_json)
                 return
-            except Exception:
-                self._usable = False
+            except Exception as exc:
+                raise StorageError(
+                    f"Keyring backend unavailable for alias '{alias}': {exc}"
+                ) from exc
         data = _read_json(self._file)
         data[alias] = token_json
         _write_json_private(self._file, data)
 
     def delete(self, alias: str) -> None:
-        if self._usable:
+        if self._uses_keyring:
             try:
                 self._keyring.delete_password(SERVICE_NAME, alias)
                 return
-            except Exception:
-                self._usable = False
+            except Exception as exc:
+                raise StorageError(
+                    f"Keyring backend unavailable for alias '{alias}': {exc}"
+                ) from exc
         data = _read_json(self._file)
         if data.pop(alias, None) is not None:
             _write_json_private(self._file, data)
