@@ -3,6 +3,7 @@ name = "gmail-mcp"
 version = "0.1.0"
 description = "Local MCP server for multiple Gmail accounts"
 requires-python = ">=3.12"
+license = "MIT"
 dependencies = [
     "mcp>=1.2.0",
     "pydantic>=2",

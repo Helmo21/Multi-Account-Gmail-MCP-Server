@@ -152,3 +152,7 @@ uv sync && uv run pytest
 193 tests, written test-first, running offline against a fake Gmail API —
 no network, credentials, or live mailbox needed. One opt-in integration
 test covers the real OAuth round trip.
+
+## License
+
+[MIT](LICENSE)
