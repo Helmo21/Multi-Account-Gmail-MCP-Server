@@ -1,12 +1,33 @@
-# Copy to your config directory as config.toml.
+# Copy to your config directory as config.toml, then edit.
 #   Linux:   ~/.config/gmail-mcp/config.toml
 #   macOS:   ~/Library/Application Support/gmail-mcp/config.toml
 #   Windows: %LOCALAPPDATA%\gmail-mcp\config.toml
 #
-# send_policy must be one of:
+# HOW MANY ACCOUNTS
+# As many as you want. Repeat the [[accounts]] block to add one, delete a
+# block to remove one. Nothing in the server assumes a particular number —
+# the only rule is that at least one account is configured. The five below
+# are an illustration, not a requirement; two is a perfectly good setup.
+# Restart Claude Desktop after editing so the server picks up the change.
+#
+# FIELDS
+# alias        the handle you use when talking to Claude ("check work-main").
+#              Any name you like, as long as it is unique.
+# email        the exact address this alias must authenticate as. Verified
+#              after consent: if the browser signs in as anyone else, the
+#              token is refused rather than saved under the wrong alias.
+#              This is what stops two aliases silently pointing at one
+#              mailbox when you authenticate several accounts in a row.
+# send_policy  required on every account, no default. One of:
 #   send        transmit immediately when asked
-#   confirm     save a draft unless the call passes confirm=true
+#   confirm     save a draft unless the call explicitly confirms
 #   draft_only  never transmit; always save a draft
+#
+# COMMANDS
+#   uv run gmail-mcp auth add <alias>      authenticate one account
+#   uv run gmail-mcp auth remove <alias>   forget its stored token
+#   uv run gmail-mcp auth list             show authentication status
+#   uv run gmail-mcp doctor                check every account is healthy
 
 [[accounts]]
 alias       = "personal"
