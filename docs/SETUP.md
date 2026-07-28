@@ -6,21 +6,57 @@ One project serves all five accounts.
 
 1. Create a project at <https://console.cloud.google.com/>.
 2. **APIs & Services → Library →** enable **Gmail API**.
-3. **APIs & Services → OAuth consent screen →** choose **Internal**.
-   Internal is available because every mailbox is on one Google Workspace
-   domain — this setup assumes all five accounts share that domain. It
-   needs no Google verification, shows no "unverified app" warning, and
-   — unlike an External screen in Testing status — does not expire
-   refresh tokens after seven days. A plain `@gmail.com` address is not
-   part of any Workspace domain, so it cannot be added to an Internal
-   consent screen; if you later add one, its authentication will fail
-   for this reason, not a bug.
+3. Configure the consent screen — **follow case A or case B below**.
 4. Add the scope `https://www.googleapis.com/auth/gmail.modify`. Add
    nothing else.
 5. **Credentials → Create credentials → OAuth client ID →
-   Application type: Desktop app.**
+   Application type: Desktop app.** Not "Web application" — the desktop
+   type is what enables the loopback redirect this server uses.
 6. Download the JSON and save it as `client_secret.json` in your config
    directory (see below).
+
+### Choosing a consent screen
+
+The server code is identical either way. Only this console setup differs.
+
+**Case A — every mailbox is on one Google Workspace domain.** The better
+option, and what this project was designed around.
+
+Create the Cloud project while signed in as a user **of that domain**.
+This matters: **Internal** is only offered when the project is owned by a
+Workspace organisation. If you create the project under a personal
+`@gmail.com` account, Internal is greyed out and you cannot switch later
+without recreating the project.
+
+Then choose **Internal**. It needs no Google verification, shows no
+"unverified app" warning, has no user cap, and — unlike External in
+Testing status — does not expire refresh tokens after seven days.
+
+A plain `@gmail.com` address is not part of any Workspace domain, so it
+cannot be added to an Internal consent screen. If you need to mix one in,
+use case B for all accounts.
+
+**Case B — consumer `@gmail.com` addresses, or a mix of both.**
+
+Internal is unavailable, so choose **External**. Two further steps are
+required, and skipping the second one is the most common way this setup
+appears to work and then breaks a week later:
+
+1. **Google Auth Platform → Audience → Test users → + Add users.** Add
+   every address you intend to authenticate. Until an address is listed
+   here, its login fails with `Error 403: access_denied` and the message
+   "has not completed the Google verification process".
+2. **Google Auth Platform → Audience → Publish app**, moving the
+   publishing status from *Testing* to *In production*. **Do not skip
+   this.** While the status is *Testing*, Google expires refresh tokens
+   after **seven days**, so every account would need re-authenticating
+   weekly and the scheduled inbox check would silently stop working in
+   between.
+
+The app remains unverified, so each login shows a "Google hasn't verified
+this app" screen. Click **Advanced → Go to *(your app name)* (unsafe)**.
+That is expected for an app you wrote and run yourself. Unverified apps
+are capped at 100 users, which is far above what this needs.
 
 ## 2. Install
 
@@ -138,6 +174,9 @@ Restart Claude Desktop, then ask it to list your accounts.
 
 | Symptom | Cause and fix |
 | --- | --- |
+| `Error 403: access_denied`, "has not completed the Google verification process" | The consent screen is External + Testing and this address is not a test user. Add it under **Google Auth Platform → Audience → Test users**, then retry. See case B above. |
+| Accounts stop working about a week after setup | The consent screen is still in *Testing*, where Google expires refresh tokens after seven days. **Audience → Publish app** to move it to *In production*. |
+| "Internal" is greyed out on the consent screen | The Cloud project is not owned by a Workspace organisation. Either recreate the project signed in as a domain user, or follow case B. |
 | `has not been authenticated` | Run `gmail-mcp auth add <alias>`. |
 | `was revoked or expired` | The password changed or access was removed. Run `gmail-mcp auth add <alias>` again. |
 | `authenticated <other address>` | The browser was signed in as the wrong account. Sign out or use a private window and retry. |
