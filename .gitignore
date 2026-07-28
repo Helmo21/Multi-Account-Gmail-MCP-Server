@@ -1,6 +1,22 @@
+# Python
 __pycache__/
 *.pyc
 .venv/
+
+# Secrets and local state — never commit these
 .env
 client_secret*.json
+credentials*.json
 token*.json
+tokens.json
+watermarks.json
+*.log
+
+# Your real config. config.example.toml is the tracked template.
+config.toml
+
+# Private to this working copy
+goal.md
+docs/DEMO.md
+docs/superpowers/
+.superpowers/
