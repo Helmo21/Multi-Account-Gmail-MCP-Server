@@ -20,3 +20,8 @@ goal.md
 docs/DEMO.md
 docs/superpowers/
 .superpowers/
+
+# Client work — never belongs in this public repo
+*.pdf
+*.docx
+*.odt
